@@ -1,10 +1,11 @@
 import tkinter as tk
-from typing import Optional
+from CTkMessagebox import CTkMessagebox
+from datasource import DataSourceVar
+from typing import List
 
 
 class DataGridView(tk.Frame):
-    def __init__(self, master, data,
-                 headers: Optional[dict] = None, read_only=False,
+    def __init__(self, master, data: DataSourceVar, max_rows: int, read_only=False,
                  headers_bg='#000000', headers_fg='#ffffff',
                  even_row_bg='#ffffff', even_row_fg='#000000',
                  odd_row_bg='#eeeeee', odd_row_fg='#000000',
@@ -12,12 +13,15 @@ class DataGridView(tk.Frame):
         super().__init__(master)
         self._headers = list(data[0].keys())
         self.master = master
+        self._max_rows = max_rows
         self._read_only = read_only
         self._data = data
+        self._data.callable(self.update, 'all', True)
         self._num_rows = len(data)
         self._num_cols = len(data[0])
         self._true_string = true_string
         self._false_string = false_string
+        self._cells = []
 
         # style variables:
         self._headers_bg = headers_bg
@@ -44,41 +48,47 @@ class DataGridView(tk.Frame):
                              highlightthickness=self._border_width,
                              highlightcolor=self._border_color,
                              relief='raised')
-            label.grid(row=0, column=col, sticky='we')
+            label.grid(row=0, column=col, sticky='nswe')
             label.bind('<Button-1>', lambda event, col_=col: self.sort_column(col_))
 
-        # Create the table _cells
+        self._create_table()
+
+        # Set the row and column weights
+        self.columnconfigure(0, weight=1)
+        for i in range(1, self._num_cols):
+            self.columnconfigure(i, weight=2)
+        for i in range(self._max_rows + 1):
+            self.rowconfigure(i, weight=1)
+
+    def _create_table(self):
         self._cells = []
-        for row in range(self._num_rows):
+        # Create the table _cells
+        for row in range(self._max_rows):
+            _test_ = row < self._num_rows
             row_cells = []
             is_even = row % 2 == 0
             for col in range(self._num_cols):
                 cell_value = tk.StringVar(
-                    value=self._revise_values(data[row][list(data[row].keys())[col]]))
+                    value=self._revise_values(self._data[row][list(self._data[row].keys())[col]]) if _test_ else None)
                 cell_entry = tk.Entry(self, textvariable=cell_value, justify='center',
                                       font=(self._font_family, self._font_size, self._font_weight),
                                       bg=self._even_row_bg if is_even else self._odd_row_bg,
                                       fg=self._even_row_fg if is_even else self._odd_row_fg,
                                       highlightthickness=self._border_width,
                                       highlightcolor=self._border_color,
-                                      state=tk.DISABLED if self._read_only else tk.NORMAL)
-                cell_entry.grid(row=row+1, column=col, sticky='we')
+                                      state=tk.DISABLED if self._read_only or not _test_ else tk.NORMAL)
+                cell_entry.grid(row=row + 1, column=col, sticky='nswe')
                 cell_entry.bind('<Return>', lambda event, row_=row, col_=col: self.save_cell(event, row_, col_))
                 cell_entry.bind('<Escape>', lambda event, row_=row, col_=col: self.cancel_edit(event, row_, col_))
                 row_cells.append(cell_value)
             self._cells.append(row_cells)
 
-        # Set the row and column weights
-        self.columnconfigure(0, weight=1)
-        for i in range(1, self._num_cols):
-            self.columnconfigure(i, weight=2)
-        for i in range(self._num_rows + 1):
-            self.rowconfigure(i, weight=1)
-
     def _revise_values(self, value, reverse=False):
         if not reverse:
             if isinstance(value, bool):
                 return self._true_string if value else self._false_string
+            if value is None:
+                return ''
             return value
         else:
             if value is None or value.strip() == '':
@@ -94,54 +104,53 @@ class DataGridView(tk.Frame):
                     return value
 
     def save_cell(self, event, row, col):
-        value = self._cells[row][col].get()
+        value = self._revise_values(self._cells[row][col].get(), True)
+        __value = self._data[row][self._headers[col]]
+        if type(value) != type(__value):
+            CTkMessagebox(title="Warning!",
+                          message=f"Incorrect type! Please insert a valid value.\n\nCOD: <{type(value)}{type(__value)}>"
+                          , icon="warning", option_1="Cancel")
+            return
         self._data[row][list(self._data[row].keys())[col]] = value
         self.master.focus()
 
     def cancel_edit(self, event, row, col):
         value = self._data[row][list(self._data[row].keys())[col]]
-        self._cells[row][col].set(value)
+        self._cells[row][col].set(self._revise_values(value))
         self.master.focus()
 
-    def remove_row(self, index):
-        if index < 0:
-            index = self._num_rows - index
-        # Remove the row from the _data and _cells lists
-        self._data.pop(index)
-        self._cells.pop(index)
+    def clear(self) -> None:
+        for row in range(self._max_rows):
+            for col in range(self._num_cols):
+                cell_value = self._cells[row][col]
+                cell_value.set('')
+        if not self._read_only:
+            __widget = self.grid_slaves()
+            for widget in __widget:
+                if isinstance(widget, tk.Entry):
+                    widget.configure(state=tk.DISABLED)
 
-        # Remove the row from the grid
-        for i in range(index+1, self._num_rows + 1):
-            for j in range(self._num_cols):
-                widget = self.grid_slaves(row=i, column=j)[0]
-                widget.grid_forget()
-                if i != index+1:
-                    widget.grid(row=i-1, column=j, sticky='we')
+    def _return_cells(self) -> List[tk.Entry]:
+        __widget = self.grid_slaves()
+        __entry_list = []
+        for widget in __widget:
+            if isinstance(widget, tk.Entry):
+                __entry_list.append(widget)
+        __entry_list.reverse()
+        return __entry_list
 
-        # Update the row and column counts
-        self._num_rows -= 1
-
-    def insert_row(self, row_data, index: Optional[int] = None):
-
-        # For none index te last row was selected:
-        index = self._num_rows if index is None else index
-        # Insert the row into the _data and _cells lists
-        self._data.insert(index, row_data)
-        row_cells = []
-        for col in range(self._num_cols):
-            cell_value = tk.StringVar(
-                value=self._revise_values(row_data[list(row_data.keys())[col]]))
-            cell_entry = tk.Entry(self, textvariable=cell_value, justify='center',
-                                  state=tk.DISABLED if self._read_only else tk.NORMAL)
-            cell_entry.grid(row=index+1, column=col, sticky='we')
-            cell_entry.bind('<Return>', lambda event, row_=index, col_=col: self.save_cell(event, row_, col_))
-            cell_entry.bind('<Escape>', lambda event, row_=index, col_=col: self.cancel_edit(event, row_, col_))
-            row_cells.append(cell_value)
-        self._cells.insert(index, row_cells)
-        self._num_rows += 1
-
-    def append_row(self, row_data):
-        self.insert_row(index=self._num_rows, row_data=row_data)
+    def update(self, event_arg1=None, event_arg2=None, event_arg3=None) -> None:
+        self._num_rows = len(self._data)
+        self.clear()
+        entry_list = self._return_cells()
+        for row in range(self._max_rows):
+            _test_ = row < self._num_rows
+            for col in range(self._num_cols):
+                this_entry = entry_list[row * self._num_cols + col]
+                this_entry.configure(state=tk.NORMAL)
+                self._cells[row][col].set(
+                    self._revise_values(self._data[row][list(self._data[row].keys())[col]]) if _test_ else '')
+                this_entry.configure(state=tk.DISABLED if self._read_only or not _test_ else tk.NORMAL)
 
     def sort_column(self, col):
         if self._sort_order == col:
@@ -311,12 +320,12 @@ if __name__ == '__main__':
     root = tk.Tk()
     root.title('Data Grid View')
 
-    __data = [{'name': 'example', 'age': 15, 'marriage': False}, {'name': 'Fulan', 'age': None, 'marriage': True}]
-    table = DataGridView(root, __data)
+    __data = DataSourceVar(value=[{'name': 'example', 'age': 15, 'marriage': False}, {'name': 'Fulan', 'age': None, 'marriage': True}])
+    table = DataGridView(root, __data, 10)
     table.pack(expand=True, fill='both')
     mynewrow = {'name': 'new name', 'age': 0, 'marriage': True}
-    table.append_row(mynewrow)
+    for x in range(10):
+        __data.append(mynewrow)
     __index = table.index(mynewrow)
-    table.remove_row(__index)
 
     root.mainloop()
