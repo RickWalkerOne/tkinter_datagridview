@@ -17,11 +17,16 @@ class DataGridView(tk.Frame):
         self._read_only = read_only
         self._data = data
         self._data.callable(self.update, 'all', True)
+        self._page = tk.IntVar(self, 0)
         self._num_rows = len(data)
         self._num_cols = len(data[0])
         self._true_string = true_string
         self._false_string = false_string
         self._cells = []
+        self._head = tk.Frame(self)
+        self._body = tk.Frame(self)
+        self._head.grid(row=0, column=0, sticky='nswe')
+        self._body.grid(row=1, column=0, sticky='nswe')
 
         # style variables:
         self._headers_bg = headers_bg
@@ -38,9 +43,20 @@ class DataGridView(tk.Frame):
 
         self._sort_order = None
 
+        # Set the row and column weights
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
+        self.rowconfigure(1, weight=self._max_rows)
+        self._head.rowconfigure(0, weight=1)
+        for i in range(self._num_cols):
+            self._head.columnconfigure(i, weight=2)
+            self._body.columnconfigure(i, weight=2)
+        for i in range(self._max_rows):
+            self._body.rowconfigure(i, weight=1)
+
         # Create the table header
         for col, key in enumerate(self._data[0].keys()):
-            label = tk.Label(self,
+            label = tk.Label(self._head,
                              text=key,
                              font=(self._font_family, self._font_size, self._font_weight),
                              bg=self._headers_bg,
@@ -53,42 +69,36 @@ class DataGridView(tk.Frame):
 
         self._create_table()
 
-        # Set the row and column weights
-        self.columnconfigure(0, weight=1)
-        for i in range(1, self._num_cols):
-            self.columnconfigure(i, weight=2)
-        for i in range(self._max_rows + 1):
-            self.rowconfigure(i, weight=1)
-
     def _create_table(self):
         self._cells = []
         # Create the table _cells
-        for row in range(self._max_rows):
+        for grid_row, row in enumerate(list(range(self._max_rows * self._page.get(), self._max_rows * (self._page.get() + 1)))):
             _test_ = row < self._num_rows
             row_cells = []
-            is_even = row % 2 == 0
+            is_even = grid_row % 2 == 0
             for col in range(self._num_cols):
                 cell_value = tk.StringVar(
+                    master=self._body,
                     value=self._revise_values(self._data[row][list(self._data[row].keys())[col]]) if _test_ else None)
-                cell_entry = tk.Entry(self, textvariable=cell_value, justify='center',
+                cell_entry = tk.Entry(self._body, textvariable=cell_value, justify='center',
                                       font=(self._font_family, self._font_size, self._font_weight),
                                       bg=self._even_row_bg if is_even else self._odd_row_bg,
                                       fg=self._even_row_fg if is_even else self._odd_row_fg,
                                       highlightthickness=self._border_width,
                                       highlightcolor=self._border_color,
                                       state=tk.DISABLED if self._read_only or not _test_ else tk.NORMAL)
-                cell_entry.grid(row=row + 1, column=col, sticky='nswe')
-                cell_entry.bind('<Return>', lambda event, row_=row, col_=col: self.save_cell(event, row_, col_))
-                cell_entry.bind('<Escape>', lambda event, row_=row, col_=col: self.cancel_edit(event, row_, col_))
+                cell_entry.grid(row=grid_row, column=col, sticky='nswe')
+                cell_entry.bind('<Return>', lambda event, row_=grid_row, col_=col: self.save_cell(event, row_, col_))
+                cell_entry.bind('<Escape>', lambda event, row_=grid_row, col_=col: self.cancel_edit(event, row_, col_))
                 row_cells.append(cell_value)
             self._cells.append(row_cells)
 
-    def _revise_values(self, value, reverse=False):
+    def _revise_values(self, value, reverse=False, none_type=False):
         if not reverse:
             if isinstance(value, bool):
                 return self._true_string if value else self._false_string
             if value is None:
-                return ''
+                return None if none_type else ''
             return value
         else:
             if value is None or value.strip() == '':
@@ -103,8 +113,15 @@ class DataGridView(tk.Frame):
                 except:
                     return value
 
-    def save_cell(self, event, row, col):
-        value = self._revise_values(self._cells[row][col].get(), True)
+    def _get_row(self, grid: int) -> int:
+        row = grid
+        for page in range(self._page.get()):
+            row += self._max_rows
+        return row
+
+    def save_cell(self, event, grid: int, col: int):
+        row = self._get_row(grid)
+        value = self._revise_values(self._cells[grid][col].get(), True)
         __value = self._data[row][self._headers[col]]
         if type(value) != type(__value):
             CTkMessagebox(title="Warning!",
@@ -114,9 +131,10 @@ class DataGridView(tk.Frame):
         self._data[row][list(self._data[row].keys())[col]] = value
         self.master.focus()
 
-    def cancel_edit(self, event, row, col):
+    def cancel_edit(self, event, grid: int, col: int):
+        row = self._get_row(grid)
         value = self._data[row][list(self._data[row].keys())[col]]
-        self._cells[row][col].set(self._revise_values(value))
+        self._cells[grid][col].set(self._revise_values(value))
         self.master.focus()
 
     def clear(self) -> None:
@@ -125,13 +143,13 @@ class DataGridView(tk.Frame):
                 cell_value = self._cells[row][col]
                 cell_value.set('')
         if not self._read_only:
-            __widget = self.grid_slaves()
+            __widget = self._body.grid_slaves()
             for widget in __widget:
                 if isinstance(widget, tk.Entry):
                     widget.configure(state=tk.DISABLED)
 
     def _return_cells(self) -> List[tk.Entry]:
-        __widget = self.grid_slaves()
+        __widget = self._body.grid_slaves()
         __entry_list = []
         for widget in __widget:
             if isinstance(widget, tk.Entry):
@@ -139,16 +157,18 @@ class DataGridView(tk.Frame):
         __entry_list.reverse()
         return __entry_list
 
-    def update(self, event_arg1=None, event_arg2=None, event_arg3=None) -> None:
+    def update(self, *args, **kwargs) -> None:
+        if 'page' in kwargs:
+            self._page.set(kwargs.pop('page'))
         self._num_rows = len(self._data)
         self.clear()
         entry_list = self._return_cells()
-        for row in range(self._max_rows):
+        for grid_row, row in enumerate(list(range(self._max_rows * self._page.get(), self._max_rows * (self._page.get() + 1)))):
             _test_ = row < self._num_rows
             for col in range(self._num_cols):
-                this_entry = entry_list[row * self._num_cols + col]
+                this_entry = entry_list[grid_row * self._num_cols + col]
                 this_entry.configure(state=tk.NORMAL)
-                self._cells[row][col].set(
+                self._cells[grid_row][col].set(
                     self._revise_values(self._data[row][list(self._data[row].keys())[col]]) if _test_ else '')
                 this_entry.configure(state=tk.DISABLED if self._read_only or not _test_ else tk.NORMAL)
 
@@ -160,20 +180,20 @@ class DataGridView(tk.Frame):
             self._sort_order = col
             reverse = False
         # Sort the _data by the selected column
-        __the_data = self._data
-        __the_data.sort(key=lambda row_: row_[self._headers[col]], reverse=reverse)
+        __the_data = sorted(
+            self._data,
+            key=lambda row_:
+                (self._revise_values(row_[self._headers[col]], none_type=True) is not None,
+                 self._revise_values(row_[self._headers[col]], none_type=True)),
+            reverse=not reverse
+        )
 
         # Re-create the cell widgets with the sorted _data
         for row, row_data in enumerate(__the_data):
+            if row == self._max_rows:
+                break
             for col, key in enumerate(self._headers):
-                self._cells[row][col].set(row_data[key])
-
-    def update_cells(self, sort_by=None):
-        if sort_by:
-            self._data.sort(key=sort_by)
-        for row, row_data in enumerate(self._data):
-            for col, cell_value in enumerate(row_data.values()):
-                self._cells[row][col].set(cell_value)
+                self._cells[row][col].set(self._revise_values(row_data[key]))
 
     def cget(self, key: str):
         return getattr(self, '_' + key)
@@ -190,36 +210,34 @@ class DataGridView(tk.Frame):
                 # update the table widget based on the variable that was changed
                 if key == '_read_only':
                     # update the state of the Entry widgets
-                    for i in range(1, self._num_rows):
-                        for j in range(self._num_cols):
-                            cell = self.grid_slaves(i, j)[0]
-                            if isinstance(cell, tk.Entry):
-                                if value:
-                                    cell.config(state='readonly')
-                                    cell.unbind('<Return>')
-                                    cell.unbind('<Escape>')
-                                else:
-                                    cell.config(state='normal')
-                                    cell.bind('<Return>', lambda event, row=i, col=j: self.save_cell(event, row, col))
-                                    cell.bind('<Escape>', lambda event, row=i, col=j: self.cancel_edit(event, row, col))
+                    __widgets = self._return_cells()
+                    for index, cell in enumerate(__widgets):
+                        __row = index // self._num_cols
+                        __col = index % self._num_cols
+                        if value:
+                            cell.config(state='readonly')
+                            cell.unbind('<Return>')
+                            cell.unbind('<Escape>')
+                        else:
+                            cell.config(state='normal')
+                            cell.bind('<Return>', lambda event, row=__row, col=__col: self.save_cell(event, row, col))
+                            cell.bind('<Escape>', lambda event, row=__row, col=__col: self.cancel_edit(event, row, col))
                 elif key == '_data':
                     # update the number of rows and columns
                     self._num_rows = len(value)
                     self._num_cols = len(self._headers)
                     # update the table widget with the new data
-                    self.update_cells()
+                    self.update()
                 elif key == '_headers':
                     # update the number of rows and columns
                     self._num_rows = len(self._data)
                     self._num_cols = len(value)
                     # update the table widget with the new headers
-                    self.update_cells()
+                    self.update()
                 elif key == '_sort_order':
                     self._sort_order = value
                     # sort the data based on the new sort order
                     self.sort_column(self._sort_order)
-                    # update the table widget with the sorted data
-                    self.update_cells()
 
     def _style_font(self, family=None, size=None, weight=None):
         if family:
@@ -228,22 +246,18 @@ class DataGridView(tk.Frame):
             self._font_size = size
         if weight:
             self._font_weight = weight
-        for row in range(1, self._num_rows):
-            for col in range(self._num_cols):
-                cell = self.grid_slaves(row, col)[0]
-                if isinstance(cell, (tk.Entry, tk.Label)):
-                    cell.configure(font=(self._font_family, self._font_size, self._font_weight))
+        __widgets = self._return_cells()
+        for cell in __widgets:
+            cell.configure(font=(self._font_family, self._font_size, self._font_weight))
 
     def _style_border(self, width=None, color=None):
         if width:
             self._border_width = width
         if color:
             self._border_color = color
-        for row in range(1, self._num_rows):
-            for col in range(self._num_cols):
-                cell = self.grid_slaves(row, col)[0]
-                if isinstance(cell, (tk.Entry, tk.Label)):
-                    cell.configure(highlightthickness=self._border_width, highlightcolor=self._border_color)
+        __widgets = self._return_cells()
+        for cell in __widgets:
+            cell.configure(highlightthickness=self._border_width, highlightcolor=self._border_color)
 
     def style(self, **kwargs):
         for key, value in kwargs:
@@ -265,23 +279,22 @@ class DataGridView(tk.Frame):
                 self._style_border(**value)
 
     def _update_style_config(self):
-        for col in range(self._num_cols):
-            cell = self.grid_slaves(0, col)[0]
+        __headers = self._head.grid_slaves()
+        for cell in __headers:
             if isinstance(cell, tk.Label):
                 cell.configure(bg=self._headers_bg, fg=self._headers_fg)
 
-        for row in range(1, self._num_rows):
-            for col in range(self._num_cols):
-                cell = self.grid_slaves(row, col)[0]
-                if isinstance(cell, tk.Entry):
-                    if row % 2 == 0:
-                        cell.configure(bg=self._even_row_bg, fg=self._even_row_bg)
-                    else:
-                        cell.configure(bg=self._odd_row_bg, fg=self._odd_row_bg)
+        __widgets = self._return_cells()
+        for index, cell in enumerate(__widgets):
+            row = index // self._num_cols
+            if row % 2 == 0:
+                cell.configure(bg=self._even_row_bg, fg=self._even_row_bg)
+            else:
+                cell.configure(bg=self._odd_row_bg, fg=self._odd_row_bg)
 
     def index(self, row):
         # Get all the widgets in the grid
-        slaves = self.grid_slaves()
+        slaves = self._head.grid_slaves() + self._body.grid_slaves()
         slaves.reverse()
 
         # Loop over all the widgets in the grid
@@ -309,7 +322,7 @@ class DataGridView(tk.Frame):
             return None
         values = {}
         for i, header in enumerate(self._headers):
-            cell = self.grid_slaves(row=index + 1, column=i)[0]
+            cell = self._body.grid_slaves(row=index, column=i)[0]
             if isinstance(cell, tk.Entry):
                 values[header] = self._revise_values(cell.get(), True)
         return values
@@ -319,10 +332,12 @@ class DataGridView(tk.Frame):
 if __name__ == '__main__':
     root = tk.Tk()
     root.title('Data Grid View')
+    root.rowconfigure(0, weight=1)
+    root.columnconfigure(0, weight=1)
 
     __data = DataSourceVar(value=[{'name': 'example', 'age': 15, 'marriage': False}, {'name': 'Fulan', 'age': None, 'marriage': True}])
     table = DataGridView(root, __data, 10)
-    table.pack(expand=True, fill='both')
+    table.grid(row=0, column=0, sticky='nsew')
     mynewrow = {'name': 'new name', 'age': 0, 'marriage': True}
     for x in range(10):
         __data.append(mynewrow)
