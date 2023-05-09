@@ -1,1 +1,1 @@
-from .datagridview import DataGridView, DataSourceVar
+from .datagridview import DataGridView, DataSourceVar, Navigator

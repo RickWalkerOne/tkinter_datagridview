@@ -1,8 +1,8 @@
-import tkinter as tk
+from tkinter import Variable, Tk
 from typing import Literal, Callable, Any
 
 
-class DataSourceVar(tk.Variable):
+class DataSourceVar(Variable):
     def __init__(self, master=None, value=None, name=None):
         super().__init__(master, value, name)
         self._value = value if value is not None else []
@@ -98,7 +98,7 @@ class DataSourceVar(tk.Variable):
 
 
 if __name__ == '__main__':
-    root = tk.Tk()
+    root = Tk()
 
     def printrow(row):
         print(row)

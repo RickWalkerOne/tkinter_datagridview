@@ -1,10 +1,11 @@
-import tkinter as tk
-from CTkMessagebox import CTkMessagebox
+from tkinter import Frame, IntVar, StringVar, Entry, Label, DISABLED, NORMAL, Tk
+from tkinter.messagebox import showwarning
 from datasource import DataSourceVar
+from navigator import Navigator
 from typing import List
 
 
-class DataGridView(tk.Frame):
+class DataGridView(Frame):
     def __init__(self, master, data: DataSourceVar, max_rows: int, read_only=False,
                  headers_bg='#000000', headers_fg='#ffffff',
                  even_row_bg='#ffffff', even_row_fg='#000000',
@@ -17,16 +18,20 @@ class DataGridView(tk.Frame):
         self._read_only = read_only
         self._data = data
         self._data.callable(self.update, 'all', True)
-        self._page = tk.IntVar(self, 0)
+        self._sorted_data = data.get()
+        self._page = IntVar(self, 0)
         self._num_rows = len(data)
         self._num_cols = len(data[0])
         self._true_string = true_string
         self._false_string = false_string
         self._cells = []
-        self._head = tk.Frame(self)
-        self._body = tk.Frame(self)
+        self._head = Frame(self)
+        self._body = Frame(self)
+        self._nav = Navigator(self, self._round(self._num_rows/self._max_rows), self._page)
+        self._nav.trace(self.update, True)
         self._head.grid(row=0, column=0, sticky='nswe')
         self._body.grid(row=1, column=0, sticky='nswe')
+        self._nav.grid(row=2, column=0, sticky='nswe')
 
         # style variables:
         self._headers_bg = headers_bg
@@ -42,11 +47,11 @@ class DataGridView(tk.Frame):
         self._border_color = 'black'
 
         self._sort_order = None
-
         # Set the row and column weights
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
         self.rowconfigure(1, weight=self._max_rows)
+        self.rowconfigure(2, weight=1)
         self._head.rowconfigure(0, weight=1)
         for i in range(self._num_cols):
             self._head.columnconfigure(i, weight=2)
@@ -56,14 +61,14 @@ class DataGridView(tk.Frame):
 
         # Create the table header
         for col, key in enumerate(self._data[0].keys()):
-            label = tk.Label(self._head,
+            label = Label(self._head,
                              text=key,
                              font=(self._font_family, self._font_size, self._font_weight),
                              bg=self._headers_bg,
                              fg=self._headers_fg,
                              highlightthickness=self._border_width,
                              highlightcolor=self._border_color,
-                             relief='raised')
+                             relief='raised', width=20)
             label.grid(row=0, column=col, sticky='nswe')
             label.bind('<Button-1>', lambda event, col_=col: self.sort_column(col_))
 
@@ -77,16 +82,16 @@ class DataGridView(tk.Frame):
             row_cells = []
             is_even = grid_row % 2 == 0
             for col in range(self._num_cols):
-                cell_value = tk.StringVar(
+                cell_value = StringVar(
                     master=self._body,
                     value=self._revise_values(self._data[row][list(self._data[row].keys())[col]]) if _test_ else None)
-                cell_entry = tk.Entry(self._body, textvariable=cell_value, justify='center',
+                cell_entry = Entry(self._body, textvariable=cell_value, justify='center',
                                       font=(self._font_family, self._font_size, self._font_weight),
                                       bg=self._even_row_bg if is_even else self._odd_row_bg,
                                       fg=self._even_row_fg if is_even else self._odd_row_fg,
                                       highlightthickness=self._border_width,
                                       highlightcolor=self._border_color,
-                                      state=tk.DISABLED if self._read_only or not _test_ else tk.NORMAL)
+                                      state=DISABLED if self._read_only or not _test_ else NORMAL)
                 cell_entry.grid(row=grid_row, column=col, sticky='nswe')
                 cell_entry.bind('<Return>', lambda event, row_=grid_row, col_=col: self.save_cell(event, row_, col_))
                 cell_entry.bind('<Escape>', lambda event, row_=grid_row, col_=col: self.cancel_edit(event, row_, col_))
@@ -124,9 +129,9 @@ class DataGridView(tk.Frame):
         value = self._revise_values(self._cells[grid][col].get(), True)
         __value = self._data[row][self._headers[col]]
         if type(value) != type(__value):
-            CTkMessagebox(title="Warning!",
-                          message=f"Incorrect type! Please insert a valid value.\n\nCOD: <{type(value)}{type(__value)}>"
-                          , icon="warning", option_1="Cancel")
+            showwarning(title="Warning!",
+                        message=f"Incorrect type! Please insert a valid value.\n\nCOD: <{type(value)}{type(__value)}>",
+                        option_1="Cancel")
             return
         self._data[row][list(self._data[row].keys())[col]] = value
         self.master.focus()
@@ -145,14 +150,24 @@ class DataGridView(tk.Frame):
         if not self._read_only:
             __widget = self._body.grid_slaves()
             for widget in __widget:
-                if isinstance(widget, tk.Entry):
-                    widget.configure(state=tk.DISABLED)
+                if isinstance(widget, Entry):
+                    widget.configure(state=DISABLED)
 
-    def _return_cells(self) -> List[tk.Entry]:
+    @staticmethod
+    def _round(decimal: float):
+        string = str(decimal)
+        sub = string[string.index('.') + 1:]
+        integer = int(sub)
+        if integer != 0:
+            return int(string[:string.index('.')]) + 1
+        else:
+            return int(string[:string.index('.')])
+
+    def _return_cells(self) -> List[Entry]:
         __widget = self._body.grid_slaves()
         __entry_list = []
         for widget in __widget:
-            if isinstance(widget, tk.Entry):
+            if isinstance(widget, Entry):
                 __entry_list.append(widget)
         __entry_list.reverse()
         return __entry_list
@@ -167,10 +182,10 @@ class DataGridView(tk.Frame):
             _test_ = row < self._num_rows
             for col in range(self._num_cols):
                 this_entry = entry_list[grid_row * self._num_cols + col]
-                this_entry.configure(state=tk.NORMAL)
+                this_entry.configure(state=NORMAL)
                 self._cells[grid_row][col].set(
-                    self._revise_values(self._data[row][list(self._data[row].keys())[col]]) if _test_ else '')
-                this_entry.configure(state=tk.DISABLED if self._read_only or not _test_ else tk.NORMAL)
+                    self._revise_values(self._sorted_data[row][list(self._sorted_data[row].keys())[col]]) if _test_ else '')
+                this_entry.configure(state=DISABLED if self._read_only or not _test_ else NORMAL)
 
     def sort_column(self, col):
         if self._sort_order == col:
@@ -180,7 +195,7 @@ class DataGridView(tk.Frame):
             self._sort_order = col
             reverse = False
         # Sort the _data by the selected column
-        __the_data = sorted(
+        self._sorted_data = sorted(
             self._data,
             key=lambda row_:
                 (self._revise_values(row_[self._headers[col]], none_type=True) is not None,
@@ -189,7 +204,7 @@ class DataGridView(tk.Frame):
         )
 
         # Re-create the cell widgets with the sorted _data
-        for row, row_data in enumerate(__the_data):
+        for row, row_data in enumerate(self._sorted_data):
             if row == self._max_rows:
                 break
             for col, key in enumerate(self._headers):
@@ -281,7 +296,7 @@ class DataGridView(tk.Frame):
     def _update_style_config(self):
         __headers = self._head.grid_slaves()
         for cell in __headers:
-            if isinstance(cell, tk.Label):
+            if isinstance(cell, Label):
                 cell.configure(bg=self._headers_bg, fg=self._headers_fg)
 
         __widgets = self._return_cells()
@@ -304,7 +319,7 @@ class DataGridView(tk.Frame):
             while j >= len(self._headers):
                 j -= len(self._headers)
             # Check if the widget is an Entry widget and has the same values as the given row
-            if isinstance(widget, tk.Entry) and self._revise_values(widget.get(), True) == row[self._headers[j]]:
+            if isinstance(widget, Entry) and self._revise_values(widget.get(), True) == row[self._headers[j]]:
                 __will_return.append(True)
             else:
                 __will_return.append(False)
@@ -323,14 +338,14 @@ class DataGridView(tk.Frame):
         values = {}
         for i, header in enumerate(self._headers):
             cell = self._body.grid_slaves(row=index, column=i)[0]
-            if isinstance(cell, tk.Entry):
+            if isinstance(cell, Entry):
                 values[header] = self._revise_values(cell.get(), True)
         return values
 
 
 # Example usage
 if __name__ == '__main__':
-    root = tk.Tk()
+    root = Tk()
     root.title('Data Grid View')
     root.rowconfigure(0, weight=1)
     root.columnconfigure(0, weight=1)
